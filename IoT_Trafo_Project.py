@@ -129,6 +129,47 @@ class HysteresisController:
         elif self.state and value <= self.threshold_off:
             self.state = False
         return self.state
+    
+def adc_to_tap(adc_value):
+    """
+    Konversi nilai ADC (0-1023) menjadi posisi tap (1-17)
+    berdasarkan data tegangan hasil pembacaan 4–20 mA pada resistor 463.7 ohm.
+
+    Parameter:
+        adc_value (int): nilai ADC (0–1023)
+
+    Return:
+        int: posisi tap (1–17)
+    """
+    # Data batas bawah ADC untuk tiap tap
+    adc_thresholds = [
+        0,     # Tap 1 (≈ 1.86 V)
+        33,    # Tap 2 (≈ 2.33 V)
+        97,    # Tap 3 (≈ 2.79 V)
+        165,   # Tap 4 (≈ 3.255 V)
+        232,   # Tap 5 (≈ 3.7146 V)
+        295,   # Tap 6 (≈ 4.178 V)
+        359,   # Tap 7 (≈ 4.636 V)
+        422,   # Tap 8 (≈ 5.097 V)
+        486,   # Tap 9 (≈ 5.55 V)
+        550,   # Tap 10 (≈ 6.01 V)
+        613,   # Tap 11 (≈ 6.465 V)
+        677,   # Tap 12 (≈ 6.922 V)
+        740,   # Tap 13 (≈ 7.375 V)
+        804,   # Tap 14 (≈ 7.832 V)
+        867,   # Tap 15 (≈ 8.265 V)
+        930,   # Tap 16 (≈ 8.718 V)
+        994    # Tap 17 (≈ 9.162 V)
+    ]
+
+    # Pastikan nilai ADC dalam batas 0–1023
+    adc_value = max(0, min(1023, adc_value))
+
+    for i in range(len(adc_thresholds) - 1):
+        if adc_thresholds[i] <= adc_value < adc_thresholds[i + 1]:
+            return i + 1  # Tap position mulai dari 1
+
+    return 17  # Jika melebihi semua threshold, berarti tap terakhir (17)
 
 def plcHandler(getPLC):
     plcData = [0]*5
@@ -141,7 +182,7 @@ def plcHandler(getPLC):
     if plcData[0] < 194:
         plcData[0] = 0
     else:
-        plcData[0] = (round(((plcData[0] - 192.324)/769.296)*100))/100 #Pressure Calibration
+        plcData[0] = adc_to_tap(plcData[0])
     return plcData
 
 def dataHandler(getTemp, getOil, getElect1, getElect2, getElect3, getHarmV, getHarmA, currentResult, CTratio, PTratio):
@@ -343,7 +384,11 @@ def mainLoop(thread_name, interval):
                 newResult = dataHandler(getTemp, getOil, getElect1, getElect2, getElect3, getHarmV, getHarmA, currentResult, CTratio, PTratio)
                 plcResult = plcHandler(getPLC)
                 if plcResult[4] == 500:
-                    newResult[0][4:6] = plcResult[0:2]
+                    newResult[0][4] = 0
+                    newResult[0][5] = plcResult[1]
+
+                sql16 = """UPDATE transformer_data SET impedance = %s WHERE trafoId = %s"""
+                cursor16.execute(sql16, (plcResult[0], 1))
             except Exception as Argument:
                 logging.info(newResult)
                 try:
